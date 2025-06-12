@@ -5,7 +5,8 @@ requests==2.31.0
 beautifulsoup4==4.12.2
 google-api-python-client==2.108.0
 praw==7.7.1
-snscrape==0.7.3.20231007
+snscrape>=0.7.0
+
 instagrapi==2.0.0
 transformers==4.35.2
 torch==2.1.1
