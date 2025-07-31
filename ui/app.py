@@ -359,14 +359,12 @@ def create_sentiment_pie_chart(sentiment_counts: dict, title: str = "Sentiment D
     return fig
 
 def create_timeline_chart(df: pd.DataFrame, title: str = "Sentiment Timeline"):
-    """Create timeline chart with proper error handling"""
+    """Create timeline chart of sentiment over time"""
+    if df.empty or 'timestamp_parsed' not in df.columns:
+        return create_fallback_histogram(df)
+    
     try:
-        if 'timestamp' not in df.columns or df.empty:
-            return create_fallback_histogram(df)
-        
-        # Parse timestamps with error handling
         df_copy = df.copy()
-        df_copy['timestamp_parsed'] = pd.to_datetime(df_copy['timestamp'], errors='coerce')
         df_valid = df_copy.dropna(subset=['timestamp_parsed'])
         
         if df_valid.empty:
@@ -379,7 +377,6 @@ def create_timeline_chart(df: pd.DataFrame, title: str = "Sentiment Timeline"):
             x='timestamp_parsed',
             y='score',
             color='sentiment',
-            size='confidence',
             hover_data=['reason', 'source'],
             color_discrete_map={
                 'Positive': '#2E8B57',
@@ -1033,8 +1030,8 @@ def display_data_table(source_name: str, scraper_info: dict, df: pd.DataFrame):
         
         final_display_df = display_df[base_columns]
         styled_df = final_display_df.style.apply(style_sentiment_row, axis=1)
-        
-        st.dataframe(styled_df, use_container_width=True, height=400)
+        # Show all rows, let Streamlit handle scrolling
+        st.dataframe(styled_df, use_container_width=True)
         
         # Detailed item view
         if st.checkbox(f"Show detailed analysis for {scraper_info['name']}", key=f"show_detailed_{source_name}"):
@@ -1192,7 +1189,20 @@ def main():
     # Display system status and configuration
     display_system_status(components)
     display_configuration_guide(components)
-    
+
+    # --- Scraper selection checkboxes ---
+    configured_scrapers = [(name, info) for name, info in components['scrapers'].items() if info['configured']]
+    st.sidebar.subheader('Select Data Sources')
+    if 'selected_scrapers' not in st.session_state:
+        st.session_state.selected_scrapers = {name: True for name, _ in configured_scrapers}
+    for name, info in configured_scrapers:
+        st.session_state.selected_scrapers[name] = st.sidebar.checkbox(
+            f"{info['icon']} {info['name']}",
+            value=st.session_state.selected_scrapers.get(name, True),
+            key=f"scraper_checkbox_{name}"
+        )
+    # --- End scraper selection checkboxes ---
+
     # Main application area
     location, scrape_button = display_location_selector()
     
@@ -1210,38 +1220,25 @@ def main():
         if st.session_state.analysis_location != location:
             st.session_state.scraped_data = {}
             st.session_state.comprehensive_analysis = {}
-        
         st.session_state.analysis_location = location
-        
         st.header(f"🔍 Comprehensive Analysis for {location}")
-        
-        # Check if any scrapers are configured
-        configured_scrapers = [(name, info) for name, info in components['scrapers'].items() if info['configured']]
-        
-        if not configured_scrapers:
-            st.error("❌ No data sources configured. Please check the setup guide in the sidebar.")
+        # Only use scrapers that are both configured and selected
+        selected_scrapers = [
+            (name, info) for name, info in configured_scrapers if st.session_state.selected_scrapers.get(name, False)
+        ]
+        if not selected_scrapers:
+            st.error("❌ No data sources selected. Please select at least one data source in the sidebar.")
             st.stop()
-        
-        # Progress tracking
-        total_scrapers = len(configured_scrapers)
+        total_scrapers = len(selected_scrapers)
         overall_progress = st.progress(0, text="🚀 Starting comprehensive data collection...")
-        
-        # Scrape from each configured source
         scraped_data = {}
-        
-        for i, (source_name, scraper_info) in enumerate(configured_scrapers):
+        for i, (source_name, scraper_info) in enumerate(selected_scrapers):
             try:
                 st.subheader(f"{scraper_info['icon']} Analyzing {scraper_info['name']}")
-                
-                # Scrape data
                 source_data = scrape_source_data(source_name, scraper_info, location, components)
                 scraped_data[source_name] = source_data
-                
-                # Show results
                 if source_data:
                     st.success(f"✅ {scraper_info['name']}: Found {len(source_data)} items")
-                    
-                    # Show sample for high-value sources
                     if source_name in ['instagram', 'claude'] and len(source_data) > 0:
                         sample = source_data[0]
                         with st.expander(f"📋 Sample {scraper_info['name']} insight"):
@@ -1249,24 +1246,16 @@ def main():
                             st.write(f"**Preview:** {sample['raw_text'][:200]}...")
                 else:
                     st.warning(f"⚪ {scraper_info['name']}: No data found")
-                
-                # Update progress
                 progress = (i + 1) / total_scrapers
                 overall_progress.progress(progress, text=f"📊 Completed {i+1}/{total_scrapers} sources")
-                
             except Exception as e:
                 st.error(f"❌ {scraper_info['name']}: {str(e)}")
                 logger.error(f"Error scraping {source_name}: {e}")
-        
-        # Store results
         st.session_state.scraped_data = scraped_data
-        
-        # Perform comprehensive analysis
         if scraped_data:
             overall_progress.progress(0.9, text="🤖 Performing AI analysis...")
             comprehensive_analysis = perform_comprehensive_analysis(scraped_data, location, components)
             st.session_state.comprehensive_analysis = comprehensive_analysis
-        
         overall_progress.progress(1.0, text="🎉 Analysis completed!")
         time.sleep(1)
         st.rerun()

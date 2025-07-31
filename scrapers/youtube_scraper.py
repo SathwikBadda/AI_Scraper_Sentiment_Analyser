@@ -27,45 +27,57 @@ class YouTubeScraper(BaseScraper):
             return []
         
         results = []
+        videos_checked = 0
+        videos_with_comments = 0
         
         try:
-            # Search for videos
+            # Search for videos with increased limit
             search_query = f"{query} Hyderabad real estate property"
             search_response = self.youtube.search().list(
                 q=search_query,
                 part='id,snippet',
-                maxResults=10,
-                type='video'
+                maxResults=50,  # Increased from 10 to 50
+                type='video',
+                order='relevance'
             ).execute()
             
             for video in search_response['items']:
                 video_id = video['id']['videoId']
+                videos_checked += 1
                 
                 try:
-                    # Get comments for each video
+                    # Get comments for each video with increased limit
                     comments_response = self.youtube.commentThreads().list(
                         part='snippet',
                         videoId=video_id,
-                        maxResults=min(limit // 10, 20),
+                        maxResults=100,  # Increased from 20 to 100
                         order='relevance'
                     ).execute()
                     
-                    for comment in comments_response['items']:
-                        comment_text = comment['snippet']['topLevelComment']['snippet']['textDisplay']
-                        published_at = comment['snippet']['topLevelComment']['snippet']['publishedAt']
-                        
-                        results.append({
-                            'text': comment_text,
-                            'url': f"https://youtube.com/watch?v={video_id}",
-                            'timestamp': published_at
-                        })
+                    # Only process if we got comments
+                    if comments_response['items']:
+                        videos_with_comments += 1
+                        for comment in comments_response['items']:
+                            comment_text = comment['snippet']['topLevelComment']['snippet']['textDisplay']
+                            published_at = comment['snippet']['topLevelComment']['snippet']['publishedAt']
+                            
+                            results.append({
+                                'text': comment_text,
+                                'url': f"https://youtube.com/watch?v={video_id}",
+                                'timestamp': published_at
+                            })
+                    else:
+                        logger.debug(f"No comments found for video {video_id}")
                         
                 except Exception as e:
-                    logger.warning(f"Error getting comments for video {video_id}: {e}")
+                    if "commentsDisabled" in str(e) or "403" in str(e):
+                        logger.debug(f"Comments disabled for video {video_id}, skipping...")
+                    else:
+                        logger.warning(f"Error getting comments for video {video_id}: {e}")
                     continue
                     
         except Exception as e:
             logger.error(f"Error scraping YouTube: {e}")
         
-        logger.info(f"Scraped {len(results)} YouTube comments for query: {query}")
-        return results[:limit]
+        logger.info(f"Scraped {len(results)} YouTube comments from {videos_with_comments}/{videos_checked} videos for query: {query}")
+        return results

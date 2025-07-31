@@ -28,7 +28,7 @@ class NewsScraper(BaseScraper):
             response = requests.get(google_news_url, timeout=10)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'xml')
-                items = soup.find_all('item')[:limit]
+                items = soup.find_all('item')  # No slicing, fetch all
                 
                 for item in items:
                     try:
